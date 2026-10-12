@@ -16,7 +16,7 @@ st.title("🌲 Dashboard สถิตินักท่องเที่ยว�
 st.caption("ข้อมูลจาก data.go.th (กรมอุทยานแห่งชาติ สัตว์ป่า และพันธุ์พืช)")
 
 # ---------------------------------------------------------
-# 2. ฟังก์ชันโหลดข้อมูล (อ่านจาก data/parks.csv)
+# 2. ฟังก์ชันโหลดข้อมูล (ชี้ตรงไปที่ data/parks.csv)
 # ---------------------------------------------------------
 @st.cache_data
 def load_data():
@@ -26,26 +26,24 @@ def load_data():
         st.error(f"❌ ไม่พบไฟล์ข้อมูลที่ '{file_path}' กรุณาตรวจสอบว่ามีไฟล์ parks.csv อยู่ในโฟลเดอร์ data")
         return None
     
-    # ลองอ่านไฟล์ด้วยการลอง Encoding ภาษาไทยหลายๆ แบบ
     encodings = ['utf-8', 'utf-8-sig', 'tis-620', 'cp838', 'latin1']
     for enc in encodings:
         try:
             df = pd.read_csv(file_path, encoding=enc)
-            df.columns = df.columns.str.strip()  # ตัดช่องว่างเกินในชื่อคอลัมน์
+            df.columns = df.columns.str.strip()
             return df
         except Exception:
             continue
             
-    st.error("❌ ไม่สามารถอ่านไฟล์ CSV ได้ กรุณาตรวจสอบรูปแบบไฟล์")
+    st.error("❌ ไม่สามารถอ่านไฟล์ CSV ได้")
     return None
 
 df = load_data()
 
 # ---------------------------------------------------------
-# 3. ส่วนประมวลผลและแสดงผลข้อมูล
+# 3. แสดงผล Dashboard
 # ---------------------------------------------------------
 if df is not None and not df.empty:
-    # ค้นหาคอลัมน์ประเภทข้อความและตัวเลขโดยอัตโนมัติ
     text_cols = df.select_dtypes(include=['object', 'string']).columns.tolist()
     num_cols = df.select_dtypes(include=['number']).columns.tolist()
 
@@ -60,7 +58,6 @@ if df is not None and not df.empty:
     cat_col = st.sidebar.selectbox("เลือกคอลัมน์ประเภท (Category):", text_cols, index=0)
     val_col = st.sidebar.selectbox("เลือกคอลัมน์ตัวเลข (Value):", num_cols, index=0)
 
-    # Widget สอง: Multiselect สำหรับเลือกรายการย่อย
     unique_items = df[cat_col].dropna().unique().tolist()
     selected_items = st.sidebar.multiselect(
         f"เลือก {cat_col}:",
@@ -72,10 +69,9 @@ if df is not None and not df.empty:
         st.warning("กรุณาเลือกอย่างน้อย 1 รายการจากตัวกรองด้านข้าง")
         st.stop()
 
-    # กรองข้อมูลตามที่เลือก
     filtered_df = df[df[cat_col].isin(selected_items)]
 
-    # แสดง KPI สรุปผล
+    # แสดง KPI
     col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
     col_kpi1.metric("รายการทั้งหมด", f"{len(filtered_df):,} รายการ")
     col_kpi2.metric(f"ผลรวม {val_col}", f"{filtered_df[val_col].sum():,.0f}")
@@ -83,7 +79,7 @@ if df is not None and not df.empty:
 
     st.markdown("---")
 
-    # กราฟที่ 1 และ 2 (ตามเกณฑ์ข้อกำหนด)
+    # กราฟ 1 และ 2
     chart_col1, chart_col2 = st.columns(2)
 
     with chart_col1:
@@ -110,6 +106,5 @@ if df is not None and not df.empty:
         )
         st.plotly_chart(fig_pie, use_container_width=True)
 
-    # ตารางข้อมูล Raw Data
     with st.expander("📋 ดูตารางข้อมูลทั้งหมด (Data Table)"):
         st.dataframe(filtered_df, use_container_width=True)
