@@ -1,0 +1,162 @@
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+import os
+
+# ---------------------------------------------------------
+# 1. ตั้งค่าหน้าเว็บ Streamlit
+# ---------------------------------------------------------
+st.set_page_config(
+    page_title="Park Visitors Dashboard",
+    page_icon="🌲",
+    layout="wide"
+)
+
+st.title("🌲 Dashboard สถิตินักท่องเที่ยวในอุทยานแห่งชาติ")
+st.caption("ข้อมูลจาก data.go.th (กรมอุทยานแห่งชาติ สัตว์ป่า และพันธุ์พืช)")
+
+# ---------------------------------------------------------
+# 2. ฟังก์ชันโหลดข้อมูล (อ่านจาก data/parks.csv)
+# ---------------------------------------------------------
+@st.cache_data
+def load_data():
+    file_path = os.path.join("data", "parks.csv")
+    
+    if not os.path.exists(file_path):
+        if os.path.exists("parks.csv"):
+            file_path = "parks.csv"
+        else:
+            st.error(f"❌ ไม่พบไฟล์ข้อมูลที่ '{file_path}' กรุณาตรวจสอบโฟลเดอร์ data/parks.csv")
+            return None
+    
+    encodings = ['utf-8', 'utf-8-sig', 'tis-620', 'cp838', 'latin1']
+    for enc in encodings:
+        try:
+            df = pd.read_csv(file_path, encoding=enc)
+            df.columns = df.columns.str.strip()  # ตัดช่องว่างเกินในชื่อคอลัมน์
+            return df
+        except Exception:
+            continue
+            
+    st.error("❌ ไม่สามารถอ่านไฟล์ CSV ได้")
+    return None
+
+df = load_data()
+
+# ---------------------------------------------------------
+# 3. ส่วนประมวลผลและสร้างระบบตัวกรองแบบครบถ้วน (Combined Filters)
+# ---------------------------------------------------------
+if df is not None and not df.empty:
+
+    # แยกประเภทคอลัมน์ทั้งหมดในไฟล์
+    text_cols = df.select_dtypes(include=['object', 'string']).columns.tolist()
+    num_cols = df.select_dtypes(include=['number']).columns.tolist()
+
+    # ตรวจหาคอลัมน์ปี (ถ้ามี)
+    col_year = None
+    for col in df.columns:
+        if 'ปี' in col or 'year' in col.lower():
+            col_year = col
+            break
+
+    # หากคอลัมน์ปีติดอยู่ในประเภทตัวเลข ให้ดึงแยกออกมาต่างหาก
+    if col_year and col_year in num_cols:
+        num_cols.remove(col_year)
+
+    st.sidebar.header("⚙️ ตัวกรองข้อมูล (Filters)")
+
+    # 1. ตัวเลือกคอลัมน์ประเภท (Category) - เช่น หน่วยงาน, ประเภทนักท่องเที่ยว, ชื่ออุทยาน ฯลฯ
+    if text_cols:
+        cat_col = st.sidebar.selectbox("📂 เลือกคอลัมน์ประเภท (Category):", text_cols, index=0)
+    else:
+        cat_col = None
+
+    # 2. ตัวเลือกคอลัมน์ตัวเลข (Value) - เช่น จำนวนนักท่องเที่ยว, รายได้ ฯลฯ
+    if num_cols:
+        val_col = st.sidebar.selectbox("📊 เลือกคอลัมน์ตัวเลข (Value):", num_cols, index=0)
+    else:
+        val_col = None
+
+    st.sidebar.markdown("---")
+
+    # 3. ตัวกรองค้นหาตามปี (Year Filter)
+    filtered_df = df.copy()
+    if col_year and col_year in df.columns:
+        years_list = sorted(df[col_year].dropna().unique().tolist())
+        selected_years = st.sidebar.multiselect(
+            f"📅 เลือกปี ({col_year}):",
+            options=years_list,
+            default=years_list
+        )
+        if selected_years:
+            filtered_df = filtered_df[filtered_df[col_year].isin(selected_years)]
+
+    # 4. ตัวกรองเลือกรายการย่อยตามประเภทที่เลือก (เช่น เลือกเฉพาะหน่วยงาน/นักท่องเที่ยวกลุ่มที่สนใจ)
+    if cat_col and cat_col in filtered_df.columns:
+        unique_items = sorted(filtered_df[cat_col].dropna().unique().tolist())
+        selected_items = st.sidebar.multiselect(
+            f"📌 เลือกรายการใน {cat_col}:",
+            options=unique_items,
+            default=unique_items[:15] if len(unique_items) > 15 else unique_items
+        )
+        if selected_items:
+            filtered_df = filtered_df[filtered_df[cat_col].isin(selected_items)]
+
+    # ตรวจสอบหากไม่มีข้อมูลตรงตามเงื่อนไข
+    if filtered_df.empty:
+        st.warning("⚠️ ไม่พบข้อมูลตามตัวกรองที่เลือก กรุณาเลือกรายการในเมนูด้านข้างเพิ่มเติม")
+        st.stop()
+
+    # --- แสดงสรุปผลสถิติ (KPI Metrics) ---
+    col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
+    col_kpi1.metric("รายการทั้งหมดที่พบ", f"{len(filtered_df):,} รายการ")
+    if val_col and val_col in filtered_df.columns:
+        col_kpi2.metric(f"ผลรวม {val_col}", f"{filtered_df[val_col].sum():,.0f}")
+        col_kpi3.metric(f"ค่าเฉลี่ย {val_col}", f"{filtered_df[val_col].mean():,.2f}")
+
+    st.markdown("---")
+
+    # --- แสดงกราฟ 2 กราฟ ---
+    chart_col1, chart_col2 = st.columns(2)
+
+    with chart_col1:
+        st.subheader(f"📊 กราฟที่ 1: แสดงเปรียบเทียบตาม {cat_col}")
+        if cat_col and val_col:
+            summary_cat = filtered_df.groupby(cat_col)[val_col].sum().reset_index()
+            fig_bar = px.bar(
+                summary_cat,
+                x=cat_col,
+                y=val_col,
+                color=cat_col,
+                title=f"ยอดรวม {val_col} แยกตาม {cat_col}",
+                text_auto='.2s'
+            )
+            fig_bar.update_layout(showlegend=False, xaxis_tickangle=-45)
+            st.plotly_chart(fig_bar, use_container_width=True)
+
+    with chart_col2:
+        if col_year and col_year in filtered_df.columns and val_col:
+            st.subheader(f"📈 กราฟที่ 2: แนวโน้มตามปี ({col_year})")
+            summary_year = filtered_df.groupby(col_year)[val_col].sum().reset_index()
+            fig_line = px.line(
+                summary_year,
+                x=col_year,
+                y=val_col,
+                markers=True,
+                title=f"แนวโน้ม {val_col} แยกตามปี"
+            )
+            st.plotly_chart(fig_line, use_container_width=True)
+        elif cat_col and val_col:
+            st.subheader(f"🥧 กราฟที่ 2: สัดส่วน {val_col}")
+            fig_pie = px.pie(
+                filtered_df,
+                names=cat_col,
+                values=val_col,
+                title=f"สัดส่วน {val_col}",
+                hole=0.4
+            )
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+    # ตารางข้อมูล Raw Data
+    with st.expander("📋 ดูตารางข้อมูลทั้งหมด (Data Table)"):
+        st.dataframe(filtered_df, use_container_width=True)
